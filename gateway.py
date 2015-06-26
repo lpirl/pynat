@@ -12,6 +12,14 @@ receiving a pre-shared secret.
 Socked addresses can be easily serialized and thereby shared between
 processes, stored in a file or database etc.
 
+    --------               |
+    |client|––.            |
+    --------   \     ------------------       ---------------
+                –––––| we (forwarder) |–––––––| remote host |
+    --------   /     ------------------       ---------------
+    |client|––'            |
+    --------               | <- possible NAT border
+
 Inspired by:
 http://code.activestate.com/recipes/483732-asynchronous-port-forwarding/
 """
@@ -32,8 +40,8 @@ class GatewayForwardingListener(dispatcher):
     a remote port.
     Therefore, it listens on the local port and connects to the remote
     host upon new connections.
-    For each connection, there will be a separate socket and thereby
-    separate socket handlers.
+    For each established connection, there will be a separate socket
+    handler doing the actual forwarding.
     """
 
     IO_LOOP_THREAD = None
@@ -81,9 +89,10 @@ class GatewayForwardingListener(dispatcher):
         self.__class__.ensure_io_loop_runs()
 
     def handle_accept(self):
+        """ establishes a new forwarding for a new client """
         socket_and_address = self.accept()
         if socket_and_address is None:
-            debug("accpted socket connection but now it's gone…")
+            debug("accepted socket connection but now it's gone…")
             return
         connection, address = socket_and_address
         debug('accepted connection from %s' % address[0])
@@ -92,7 +101,8 @@ class GatewayForwardingListener(dispatcher):
 
         to_client = self.SocketToClientDispatcher(
             connection,
-            buffers, self.bufsize
+            buffers,
+            self.bufsize
         )
         to_remote_host = self.SocketToRemoteHostDispatcher(
             self.remote_address,
@@ -104,7 +114,7 @@ class GatewayForwardingListener(dispatcher):
         to_remote_host.buddy_dispatcher = to_client
 
     def get_listen_port(self):
-        """ returns the port we are listening on """
+        """ returns the local port we are listening on """
         return self.socket.getsockname()[1]
 
     def handle_close(self):
@@ -120,7 +130,7 @@ class GatewayForwardingListener(dispatcher):
 
     class ForwardingBuffers(object):
         """
-        Shared buffers for forwarding dispatchers.
+        Shared data buffers for forwarding dispatchers.
         """
 
         def __init__(self):
@@ -129,10 +139,12 @@ class GatewayForwardingListener(dispatcher):
 
     class SocketToClientDispatcher(dispatcher):
         """
-        This class handles the socket pointing to the client.
+        This class handles the socket that points to a client.
 
         It basically receives sent data, buffers it, and makes it
         readable for the `SocketToRemoteHostDispatcher` (and vice versa).
+
+        TODO: can probably be generalized w/ SocketToRemoteHostDispatcher
         """
 
         def __init__(self, connection, buffers, bufsize):
@@ -167,7 +179,7 @@ class GatewayForwardingListener(dispatcher):
             self.close()
 
             # if this socket to the client is closed, the one to the
-            # remote must be closed as well
+            # remote host must be closed as well
             buddy = self.buddy_dispatcher
             if buddy:
                 debug(
@@ -178,15 +190,18 @@ class GatewayForwardingListener(dispatcher):
 
     class SocketToRemoteHostDispatcher(dispatcher):
         """
-        This class handles the socket pointing to the remote host.
+        This class handles the socket that points to the remote host.
 
         It basically reads data from the `SocketToClientDispatcher` and
         sends it to the remote host (and vice versa).
+
+        TODO: can probably be generalized w/ SocketToClientDispatcher
         """
 
         def __init__(self, remote_address, buffers, bufsize):
             """
-            Initializes the dispatch of a new connection to the remote host.
+            Initializes the dispatch of a new connection to the remote
+            host.
             """
             dispatcher.__init__(self)
             self.buffers = buffers
@@ -230,9 +245,8 @@ class GatewayForwardingListener(dispatcher):
 
 class GatewayCloseListener(dispatcher):
     """
-    This is a server that listens on a UNIX socket and closes a certain
-    other dispatcher and itself when receiving a specific secret from
-    a client.
+    This is a "server" that listens on a UNIX socket and closes a certain
+    other socket/dispatcher and itself when receiving a pre-shared secret.
     """
 
     def __init__(self, socket_path, socket_secret, socket_to_close,
@@ -254,6 +268,7 @@ class GatewayCloseListener(dispatcher):
         self.listen(backlog)
 
     def handle_accept(self):
+        """ starts a dispatcher for a newly connecting client """
         socket_and_address = self.accept()
         if socket_and_address is None:
             debug("accpted socket connection but now it's gone…")
@@ -281,8 +296,10 @@ class GatewayCloseListener(dispatcher):
         """
         This is the handler for any connected client connected to the
         "close server".
-        If it received the correct secret, it also closes the
-        GatewayCloseListener.
+        If it receives the correct secret, it closes the
+        ``GatewayForwardingListener`` (``forwarding_listener``)
+        ``GatewayCloseListener`` (``close_listener``)
+        and itself.
         """
 
         def __init__(self, connection, secret, close_listener,
