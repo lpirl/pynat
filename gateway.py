@@ -34,7 +34,7 @@ from asyncore import dispatcher, loop
 from logging import info, debug
 
 
-class GatewayForwardingListener(dispatcher):
+class PortForwarding(dispatcher):
     """
     This class handles the forwarding of traffic from a local port to
     a remote port.
@@ -99,12 +99,12 @@ class GatewayForwardingListener(dispatcher):
 
         buffers = self.ForwardingBuffers()
 
-        to_client = self.SocketToClientDispatcher(
+        to_client = self.ConnectionToClient(
             connection,
             buffers,
             self.bufsize
         )
-        to_remote_host = self.SocketToRemoteHostDispatcher(
+        to_remote_host = self.ConnectionToRemoteHost(
             self.remote_address,
             buffers,
             self.bufsize
@@ -124,7 +124,7 @@ class GatewayForwardingListener(dispatcher):
         by either of the endpoints.
         """
         debug(
-            'closing GatewayForwardingListener at %s:%s' % self.getsockname()
+            'closing PortForwarding at %s:%s' % self.getsockname()
         )
         self.close()
 
@@ -137,14 +137,14 @@ class GatewayForwardingListener(dispatcher):
             self.to_client = str()
             self.to_remote_host = str()
 
-    class SocketToClientDispatcher(dispatcher):
+    class ConnectionToClient(dispatcher):
         """
         This class handles the socket that points to a client.
 
         It basically receives sent data, buffers it, and makes it
-        readable for the `SocketToRemoteHostDispatcher` (and vice versa).
+        readable for the `ConnectionToRemoteHost` (and vice versa).
 
-        TODO: can probably be generalized w/ SocketToRemoteHostDispatcher
+        TODO: can probably be generalized w/ ConnectionToRemoteHost
         """
 
         def __init__(self, connection, buffers, bufsize):
@@ -188,14 +188,14 @@ class GatewayForwardingListener(dispatcher):
                 ))
                 buddy.close()
 
-    class SocketToRemoteHostDispatcher(dispatcher):
+    class ConnectionToRemoteHost(dispatcher):
         """
         This class handles the socket that points to the remote host.
 
-        It basically reads data from the `SocketToClientDispatcher` and
+        It basically reads data from the `ConnectionToClient` and
         sends it to the remote host (and vice versa).
 
-        TODO: can probably be generalized w/ SocketToClientDispatcher
+        TODO: can probably be generalized w/ ConnectionToClient
         """
 
         def __init__(self, remote_address, buffers, bufsize):
@@ -243,10 +243,15 @@ class GatewayForwardingListener(dispatcher):
                 buddy.close()
 
 
-class GatewayCloseListener(dispatcher):
+class PortForwardingTerminator(dispatcher):
     """
     This is a "server" that listens on a UNIX socket and closes a certain
     other socket/dispatcher and itself when receiving a pre-shared secret.
+
+    It does **not** close established connections, it just disables new
+    connections.
+
+    TODO: also provide functionality to close established connections.
     """
 
     def __init__(self, socket_path, socket_secret, socket_to_close,
@@ -254,7 +259,7 @@ class GatewayCloseListener(dispatcher):
         """
         Initializes the dispatch of a new connection to the remote host.
         """
-        debug("GatewayCloseListener initialized")
+        debug("PortForwardingTerminator initialized")
         dispatcher.__init__(self)
 
         self.socket_secret = socket_secret
@@ -274,9 +279,9 @@ class GatewayCloseListener(dispatcher):
             debug("accpted socket connection but now it's gone…")
             return
         connection, address = socket_and_address
-        debug('GatewayCloseListener accepted connection')
+        debug('PortForwardingTerminator accepted connection')
 
-        self.CloseDispatcher(
+        self.ConnectionToTerminator(
             connection,
             self.socket_secret,
             self.socket_to_close,
@@ -287,18 +292,18 @@ class GatewayCloseListener(dispatcher):
     def handle_close(self):
         sockname = self.socket.getsockname()
         debug(
-            "closing GatewayCloseListener on '%s'" % sockname
+            "closing PortForwardingTerminator on '%s'" % sockname
         )
         remove(sockname)
         self.close()
 
-    class CloseDispatcher(dispatcher):
+    class ConnectionToTerminator(dispatcher):
         """
         This is the handler for any connected client connected to the
         "close server".
         If it receives the correct secret, it closes the
-        ``GatewayForwardingListener`` (``forwarding_listener``)
-        ``GatewayCloseListener`` (``close_listener``)
+        ``PortForwarding`` (``forwarding_listener``)
+        ``PortForwardingTerminator`` (``close_listener``)
         and itself.
         """
 
@@ -307,7 +312,7 @@ class GatewayCloseListener(dispatcher):
             """
             Initializes the dispatch of a new connection to the remote host.
             """
-            debug("CloseDispatcher initialized")
+            debug("ConnectionToTerminator initialized")
             dispatcher.__init__(self, connection)
             self.secret = secret
             self.close_listener = close_listener
@@ -319,11 +324,11 @@ class GatewayCloseListener(dispatcher):
             recv = self.recv(self.bufsize)
             self.recv_buf += recv
             if len(self.recv_buf) > len(self.secret):
-                debug("CloseDispatcher invalid secret")
+                debug("ConnectionToTerminator received invalid secret")
                 self.handle_close()
                 return
             if self.secret == self.recv_buf:
-                debug("CloseDispatcher correct secret received")
+                debug("ConnectionToTerminator received correct secret")
                 self.forwarding_listener.handle_close()
                 self.close_listener.handle_close()
                 self.handle_close()
@@ -332,5 +337,5 @@ class GatewayCloseListener(dispatcher):
             return False
 
         def handle_close(self):
-            debug("CloseDispatcher closed")
+            debug("ConnectionToTerminator closed")
             self.close()
