@@ -23,7 +23,7 @@ from threading import Thread
 from socket import AF_INET, SOCK_STREAM, AF_UNIX
 from asyncore import dispatcher, loop
 
-from src.util import logging
+from logging import info, debug
 
 
 class GatewayForwardingListener(dispatcher):
@@ -47,7 +47,7 @@ class GatewayForwardingListener(dispatcher):
         if thread is not None and thread.is_alive():
             return
 
-        logging.info(
+        info(
             ('restarting' if thread else 'starting') +
             " the GatewayDispatcher's main IO loop"
         )
@@ -83,10 +83,10 @@ class GatewayForwardingListener(dispatcher):
     def handle_accept(self):
         socket_and_address = self.accept()
         if socket_and_address is None:
-            logging.debug("accpted socket connection but now it's gone…")
+            debug("accpted socket connection but now it's gone…")
             return
         connection, address = socket_and_address
-        logging.debug('accepted connection from %s' % address[0])
+        debug('accepted connection from %s' % address[0])
 
         buffers = self.ForwardingBuffers()
 
@@ -113,7 +113,7 @@ class GatewayForwardingListener(dispatcher):
         This does not close existing connections. Those will be closed
         by either of the endpoints.
         """
-        logging.debug(
+        debug(
             'closing GatewayForwardingListener at %s:%s' % self.getsockname()
         )
         self.close()
@@ -161,7 +161,7 @@ class GatewayForwardingListener(dispatcher):
             self.buffers.to_client = self.buffers.to_client[sent_count:]
 
         def handle_close(self):
-            logging.debug(
+            debug(
                 'connection to client %s closed' % self.getsockname()[0]
             )
             self.close()
@@ -170,7 +170,7 @@ class GatewayForwardingListener(dispatcher):
             # remote must be closed as well
             buddy = self.buddy_dispatcher
             if buddy:
-                logging.debug(
+                debug(
                     "closing buddy socket to %s as well" % (
                         buddy.getsockname()[0],
                 ))
@@ -212,7 +212,7 @@ class GatewayForwardingListener(dispatcher):
             self.buffers.to_remote_host = self.buffers.to_remote_host[sent:]
 
         def handle_close(self):
-            logging.debug(
+            debug(
                 'connection to remote host %s closed' % self.getsockname()[0]
             )
             self.close()
@@ -221,7 +221,7 @@ class GatewayForwardingListener(dispatcher):
             # client must be closed as well
             buddy = self.buddy_dispatcher
             if buddy:
-                logging.debug(
+                debug(
                     "closing buddy socket to %s as well" % (
                         buddy.getsockname()[0],
                 ))
@@ -240,7 +240,7 @@ class GatewayCloseListener(dispatcher):
         """
         Initializes the dispatch of a new connection to the remote host.
         """
-        logging.debug("GatewayCloseListener initialized")
+        debug("GatewayCloseListener initialized")
         dispatcher.__init__(self)
 
         self.socket_secret = socket_secret
@@ -256,10 +256,10 @@ class GatewayCloseListener(dispatcher):
     def handle_accept(self):
         socket_and_address = self.accept()
         if socket_and_address is None:
-            logging.debug("accpted socket connection but now it's gone…")
+            debug("accpted socket connection but now it's gone…")
             return
         connection, address = socket_and_address
-        logging.debug('GatewayCloseListener accepted connection')
+        debug('GatewayCloseListener accepted connection')
 
         self.CloseDispatcher(
             connection,
@@ -271,7 +271,7 @@ class GatewayCloseListener(dispatcher):
 
     def handle_close(self):
         sockname = self.socket.getsockname()
-        logging.debug(
+        debug(
             "closing GatewayCloseListener on '%s'" % sockname
         )
         remove(sockname)
@@ -290,7 +290,7 @@ class GatewayCloseListener(dispatcher):
             """
             Initializes the dispatch of a new connection to the remote host.
             """
-            logging.debug("CloseDispatcher initialized")
+            debug("CloseDispatcher initialized")
             dispatcher.__init__(self, connection)
             self.secret = secret
             self.close_listener = close_listener
@@ -302,11 +302,11 @@ class GatewayCloseListener(dispatcher):
             recv = self.recv(self.bufsize)
             self.recv_buf += recv
             if len(self.recv_buf) > len(self.secret):
-                logging.debug("CloseDispatcher invalid secret")
+                debug("CloseDispatcher invalid secret")
                 self.handle_close()
                 return
             if self.secret == self.recv_buf:
-                logging.debug("CloseDispatcher correct secret received")
+                debug("CloseDispatcher correct secret received")
                 self.forwarding_listener.handle_close()
                 self.close_listener.handle_close()
                 self.handle_close()
@@ -315,5 +315,5 @@ class GatewayCloseListener(dispatcher):
             return False
 
         def handle_close(self):
-            logging.debug("CloseDispatcher closed")
+            debug("CloseDispatcher closed")
             self.close()
