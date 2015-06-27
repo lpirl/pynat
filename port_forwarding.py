@@ -104,7 +104,8 @@ class PortForwarding(dispatcher):
         to_client.buddy_dispatcher = to_remote_host
         to_remote_host.buddy_dispatcher = to_client
 
-    def get_listen_port(self):
+    @property
+    def listen_port(self):
         """ returns the local port we are listening on """
         return self.socket.getsockname()[1]
 
