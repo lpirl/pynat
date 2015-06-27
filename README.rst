@@ -15,10 +15,11 @@ use case
   process that created a port forwarding also closes it (but another
   process will do it)
 
-    * this is true for most Web applications
+  * this is true for most Web applications
+
 * you don't want to grant you application rights to use ``iptables`` etc.
 
-    * this would probably make the deployment less joyful and less secure
+  * this would probably make the deployment less joyful and less secure
 
 examples
 --------
