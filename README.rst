@@ -21,6 +21,8 @@ use case
 
   * this would probably make the deployment less joyful and less secure
 
+* you prefer few dependencies
+
 examples
 --------
 
