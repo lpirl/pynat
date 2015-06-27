@@ -1,13 +1,13 @@
 #!/usr/bin/python2
 # coding: UTF-8
 
-from urllib2 import urlopen
-
-from port_forwarding import PortForwarding
-
 """
 A minimal example for establishing a port forwarding.
 """
+
+from urllib2 import urlopen
+
+from port_forwarding import PortForwarding
 
 # set up the port forwarding
 remote_host = "duckduckgo.com"
