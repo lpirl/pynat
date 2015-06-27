@@ -2,9 +2,9 @@
 
 """
 To be able to close a socket (``S1``) of a process (``P``) from within
-another process, we listen on a UNIX socket (``S2``) in the same process
-(``P``) and close all sockets (``S1`` and ``S2``) upon receiving a
-pre-shared secret.
+another process, we listen on an UNIX socket (``S2``) in the same
+process (``P``) and close all sockets (``S1`` and ``S2``) upon receiving
+a pre-shared secret.
 
 UNIX socked addresses can be easily serialized and thereby shared between
 processes, stored in a file, a database etc.
@@ -111,5 +111,5 @@ class PortForwardingTerminator(dispatcher):
             return False
 
         def handle_close(self):
-            debug("ConnectionToTerminator closed")
             self.close()
+            debug("ConnectionToTerminator closed")
