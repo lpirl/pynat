@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python2 -O
 # coding: UTF-8
 
 """
@@ -81,7 +81,7 @@ close_socket_path = queue.get()
 close_secret = queue.get()
 
 # … do something with the port forwarding …
-print "forwaring works before closing it?", \
+print "forwaring works before closing it:", \
         port_is_open("127.0.0.1", listen_port)
 
 # terminate the forwarding

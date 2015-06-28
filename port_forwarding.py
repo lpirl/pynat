@@ -19,20 +19,26 @@ from socket import error as SocketError
 from os import remove
 
 from threading import Thread
-from socket import AF_INET, SOCK_STREAM
+from socket import socket, AF_INET, SOCK_STREAM
 from asyncore import dispatcher, loop
 
 from logging import info, debug
 
+if __debug__:
+    from logging import basicConfig, DEBUG
+    basicConfig(level=DEBUG)
 
 class PortForwarding(dispatcher):
     """
-    This class handles the forwarding of traffic from a local port to
+    This class enables the forwarding of traffic from a local port to
     a remote port.
+
     Therefore, it listens on the local port and connects to the remote
     host upon new connections.
-    For each established connection, there will be a separate socket
-    handler doing the actual forwarding.
+
+    For each established connection, there will be two separate sockets
+    (one pointing  to the client, one pointing to the remote host)
+    doing the actual forwarding.
     """
 
     IO_LOOP_THREAD = None
@@ -40,7 +46,7 @@ class PortForwarding(dispatcher):
     @classmethod
     def ensure_io_loop_runs(cls):
         """
-        Responsible for starting the GatewayDispatcher's main IO loop.
+        Responsible for starting the PortForwarding's main IO loop.
         """
         thread = cls.IO_LOOP_THREAD
         if thread is not None and thread.is_alive():
@@ -48,12 +54,12 @@ class PortForwarding(dispatcher):
 
         info(
             ('restarting' if thread else 'starting') +
-            " the GatewayDispatcher's main IO loop"
+            " the PortForwarding's main IO loop"
         )
 
         thread = Thread(
             target=loop,
-            name=cls.__name__
+            name="asyncore IO loop for %s" % cls.__name__
         )
         thread.start()
         cls.IO_LOOP_THREAD = thread
@@ -80,29 +86,42 @@ class PortForwarding(dispatcher):
         self.__class__.ensure_io_loop_runs()
 
     def handle_accept(self):
-        """ establishes a new forwarding for a new client """
+        """ establishes a new connection for a connecting client """
+
         socket_and_address = self.accept()
         if socket_and_address is None:
             debug("accepted socket connection but now it's gone…")
             return
-        connection, address = socket_and_address
-        debug('accepted connection from %s' % address[0])
+        socket_to_client, address = socket_and_address
+        debug('accepted connection from %s:%i' % address)
 
-        buffers = self.ForwardingBuffers()
+        # establish a connection to the remote host for the connecting
+        # client:
+        debug('connecting to remote host %s:%i' % self.remote_address)
+        socket_to_remote_host = socket(AF_INET, SOCK_STREAM)
+        socket_to_remote_host.connect(self.remote_address)
 
-        to_client = self.ConnectionToClient(
-            connection,
-            buffers,
+        # initialize buffers for the forwarding:
+        buffer_client_to_remote_host = self.__class__.ForwardingBuffer()
+        buffer_remote_host_to_client = self.__class__.ForwardingBuffer()
+
+        # create forwarding connections for both sockets:
+        connection_to_client = self.EstablishedConnection(
+            socket_to_client,
+            buffer_client_to_remote_host,
+            buffer_remote_host_to_client,
             self.bufsize
         )
-        to_remote_host = self.ConnectionToRemoteHost(
-            self.remote_address,
-            buffers,
+        connection_to_remote_host = self.EstablishedConnection(
+            socket_to_remote_host,
+            buffer_remote_host_to_client,
+            buffer_client_to_remote_host,
             self.bufsize
         )
 
-        to_client.buddy_dispatcher = to_remote_host
-        to_remote_host.buddy_dispatcher = to_client
+        # tell both connections about the other one:
+        connection_to_client.buddy_connection = connection_to_remote_host
+        connection_to_remote_host.buddy_connection = connection_to_client
 
     @property
     def listen_port(self):
@@ -115,121 +134,84 @@ class PortForwarding(dispatcher):
         This does not close existing connections. Those will be closed
         by either of the endpoints.
         """
-        debug(
-            'closing PortForwarding at %s:%s' % self.getsockname()
-        )
+        debug('closing PortForwarding at %s:%s' % self.getsockname())
         self.close()
 
-    class ForwardingBuffers(object):
+    class ForwardingBuffer(object):
         """
-        Shared data buffers for forwarding dispatchers.
+        A class containing a simple string buffer.
+
+        It is used as a shared reference to the buffer among objects
+        (because strings cannot be modified in-place).
         """
 
         def __init__(self):
-            self.to_client = str()
-            self.to_remote_host = str()
+            self._buffer = ""
 
-    class ConnectionToClient(dispatcher):
+        def add(self, value):
+            """ add to the buffer """
+            self._buffer += value
+
+        def get(self):
+            """ get the whole buffer """
+            return self._buffer
+
+        def remove(self, count):
+            self._buffer = self._buffer[count:]
+
+        def has_content(self):
+            return bool(self)
+
+    class EstablishedConnection(dispatcher):
         """
-        This class handles the socket that points to a client.
+        This class handles the actual forwarding of data for an
+        established socket connection.
+        (This could be either to the client or to the remote host.)
 
-        It basically receives sent data, buffers it, and makes it
-        readable for the `ConnectionToRemoteHost` (and vice versa).
-
-        TODO: can probably be generalized w/ ConnectionToRemoteHost
+        To do so, it does the following:
+        * receive data and write it to the ``buffer_received``
+        * read data from the ``buffer_to_send`` and send it
         """
 
-        def __init__(self, connection, buffers, bufsize):
+        def __init__(self, socket_to_use, buffer_received, buffer_to_send,
+                    bufsize):
             """
-            Initializes the dispatch of the already existing connection.
+            Initializes the dispatch of an optionally already existing
+            connection.
             """
-            dispatcher.__init__(self, connection)
-            self.buffers = buffers
+            debug("initializing dispatcher for %s:%i"
+                    % socket_to_use.getsockname())
+            dispatcher.__init__(self, socket_to_use)
+            self.buffer_received = buffer_received
+            self.buffer_to_send = buffer_to_send
             self.bufsize = bufsize
-            self.buddy_dispatcher = None
+            self.buddy_connection = None
 
         def handle_connect(self):
             pass
 
         def handle_read(self):
-            """ client --> buffer """
+            """ receive into buffer """
             read = self.recv(self.bufsize)
-            self.buffers.to_remote_host += read
+            self.buffer_received.add(read)
 
         def writable(self):
-            return (len(self.buffers.to_client) > 0)
+            return self.buffer_to_send.has_content()
 
         def handle_write(self):
-            """ client <-- buffer """
-            sent_count = self.send(self.buffers.to_client)
-            self.buffers.to_client = self.buffers.to_client[sent_count:]
+            """ send from buffer """
+            sent_count = self.send(self.buffer_to_send.get())
+            self.buffer_to_send.remove(sent_count)
 
         def handle_close(self):
             debug(
-                'connection to client %s closed' % self.getsockname()[0]
+                'connection to client %s:%i closed' % self.getsockname()
             )
             self.close()
 
             # if this socket to the client is closed, the one to the
             # remote host must be closed as well
-            buddy = self.buddy_dispatcher
+            buddy = self.buddy_connection
             if buddy:
-                debug(
-                    "closing buddy socket to %s as well" % (
-                        buddy.getsockname()[0],
-                ))
-                buddy.close()
-
-    class ConnectionToRemoteHost(dispatcher):
-        """
-        This class handles the socket that points to the remote host.
-
-        It basically reads data from the `ConnectionToClient` and
-        sends it to the remote host (and vice versa).
-
-        TODO: can probably be generalized w/ ConnectionToClient
-        """
-
-        def __init__(self, remote_address, buffers, bufsize):
-            """
-            Initializes the dispatch of a new connection to the remote
-            host.
-            """
-            dispatcher.__init__(self)
-            self.buffers = buffers
-            self.bufsize = bufsize
-            self.buddy_dispatcher = None
-            self.create_socket(AF_INET, SOCK_STREAM)
-            self.connect(remote_address)
-
-        def handle_connect(self):
-            pass
-
-        def handle_read(self):
-            """ buffer <-- remote host """
-            read = self.recv(self.bufsize)
-            self.buffers.to_client += read
-
-        def writable(self):
-            return (len(self.buffers.to_remote_host) > 0)
-
-        def handle_write(self):
-            """ buffer --> remote host """
-            sent = self.send(self.buffers.to_remote_host)
-            self.buffers.to_remote_host = self.buffers.to_remote_host[sent:]
-
-        def handle_close(self):
-            debug(
-                'connection to remote host %s closed' % self.getsockname()[0]
-            )
-            self.close()
-
-            # if this socket to the remote is closed, the one to the
-            # client must be closed as well
-            buddy = self.buddy_dispatcher
-            if buddy:
-                debug(
-                    "closing buddy socket to %s as well" % (
-                        buddy.getsockname()[0],
-                ))
+                debug("closing buddy socket %s:%i" % buddy.getsockname())
                 buddy.close()
