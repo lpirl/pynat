@@ -15,9 +15,9 @@ from multiprocessing import Process, Queue
 from socket import socket, AF_UNIX, SOCK_STREAM, error as socket_error
 from tempfile import mktemp
 
-from port_forwarding import PortForwarding
-from port_forwarding_terminator import PortForwardingTerminator
-from util import port_is_open, wait_for_all_child_threads
+from pynat import PortForwarding
+from pynat import PortForwardingTerminator
+from pynat.util import port_is_open, wait_for_all_child_threads
 
 def establising_process(queue):
     """

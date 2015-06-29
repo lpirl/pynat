@@ -7,7 +7,7 @@ A minimal example for establishing a port forwarding.
 
 from urllib2 import urlopen
 
-from port_forwarding import PortForwarding
+from pynat import PortForwarding
 
 # set up the port forwarding
 remote_host = "duckduckgo.com"
