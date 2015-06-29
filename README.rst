@@ -1,7 +1,11 @@
 pynat
 =====
 
-DNAT port forwarding in pure Python, asynchronous
+DNAT port forwarding in pure Python
+
+* asynchronous (uses non-blocking `asyncore <https://docs.python.org/2/library/asyncore.html>`_ library)
+* no dependencies
+* compatible with PyPy
 
 use case
 --------
