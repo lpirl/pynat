@@ -27,6 +27,13 @@ use case
 
 * you prefer few dependencies
 
+installation
+------------
+
+.. code::
+
+  pip install [--user] git+https://github.com/lpirl/pynat.git
+
 examples
 --------
 
